@@ -1,0 +1,253 @@
+---
+title: "Caso Práctico Final"
+author: "Jorge Martín"
+date: "10/11/2020"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+---
+## Actividades a realizar
+
+1. Carga los datos. Realiza una inspección por variables de la distribución de aprobación de crédito en función de cada atributo visualmente. Realiza las observaciones pertinentes. ¿ Qué variables son mejores para separar los datos?
+
+```{r}
+#Carga de Datos.
+df<-read.csv("CASO_FINAL_crx.data", header=F, stringsAsFactors=T, na.strings="?")
+head(df)
+```
+```{r}
+str(df)
+```
+```{r}
+summary(df)
+```
+```{r}
+#Carga de ggplot2 para la representación de la inspección por variables.
+library(ggplot2)
+```
+```{r}
+#Mostramos cada variable como histograma si es numérica o diagrama de barras si es Categórica.
+for (columna in 1:ncol(df)){
+  if (class(df[,columna]) == "factor"){
+    # Por defecto se mostrará un gráfico de barras.
+    plot(df[,columna], 
+         col = topo.colors(length(levels(df[,columna]))),
+         las = 1,
+         main = paste("Diagrama de barras de: ", colnames(df[columna])))
+  } else {
+    # Para las variables numéricas, histograma.
+    hist(df[, columna], 
+         border = "blue", 
+         col = "tomato", 
+         las = 1, 
+         main = paste("Histograma de: ", colnames(df[columna])),
+         xlab  = colnames(df[columna]))
+  }
+}
+```
+Las Variables V9,V10 y V12 tienen una repartición equitativa de sus datos.
+Las variables continuas V2,V3,V8,V11,V14,V15 tienen la gran mayoría de sus datos acumulados a la izquierda.
+En la variale V4 destaca el valor u en la V5 en valor g en la variable V13 el valor g y en la variable V7 el valor v.
+Por último la variable V6 tiene uns distribueción euqitativa tambiñen de los datos destacando la cartegoríac.
+```{r}
+#Representación de cada variable contra la variable objetivo.
+explain.target <- function(dataframe.object, target.feature){
+  
+  for (columna in 1:ncol(dataframe.object)){
+    
+    if (names(dataframe.object[columna]) == "V16"){
+      next
+      
+    } else {
+      if (class(dataframe.object[, columna]) == "factor"){
+        plot <- ggplot(dataframe.object) + 
+          geom_bar(aes(dataframe.object[, columna], fill = as.factor(target.feature))) + 
+          labs(title=paste(names(dataframe.object[columna]), " ~ V16")) + 
+          xlab(names(dataframe.object[columna])) + 
+          ylab("Frecuencia") +
+          scale_fill_discrete(name="Crédito aprovado", breaks=c("-", "+"),
+                           labels=c("SI", "NO"))
+      
+      } else {
+        plot <- ggplot(dataframe.object) + 
+          geom_boxplot(aes(dataframe.object[, columna], fill = as.factor(target.feature))) + 
+          coord_flip() +
+          labs(title=paste(names(dataframe.object[columna]), " ~ V16")) + 
+          xlab(names(dataframe.object[columna])) + 
+          scale_fill_discrete(name="Crédito aprovado", breaks=c("-", "+"),
+                           labels=c("SI", "NO"))
+      }
+      plot <- print(plot)
+    }
+  }
+}
+explain.target(dataframe.object = df, target.feature = df$V16)
+```
+Podemos observar que las variables V9 y V10 son las que más influyen para la aprovación del créidito o no , ya que sus probabilidades varian, o por encima del 50% o por debajo de cada categoría de cada variable.
+```{r}
+#Dentro de las variables numéricas vemos la correlación que tienen entre ellas.
+library(dplyr)
+library(corrplot)
+numeric.values <- df %>% dplyr::select(V2,V3,V8,V11,V14,V15)
+corrplot(cor(numeric.values), method = "number", type="upper")
+```
+Dentro de las variables numéricas podemos decir que la variable V3 tiene una correlación positivas con el resto de variables numéricas menos con V14,igual que V8 y V11
+
+2. Prepara el dataset convenientemente e imputa los valores faltantes usando la librería `missForest`
+```{r}
+#Cargamos la librería missforest.
+#install.packages("missForest")
+library(missForest)
+
+set.seed(999)
+df.imp<-missForest(df)
+mdf<-df.imp$ximp #Creamos el nuevo datset
+mdf$V16 <- as.numeric(mdf$V16)-1
+apply(is.na(df.imp$ximp),2,sum)#Comprobamos que ya no hay NAs
+```
+```{r}
+#Para las variables categóricas creamos variables dummies
+library(fastDummies)
+ndf <- dummy_cols(mdf, remove_selected_columns = T)
+colnames(ndf)
+```
+
+3. Divide el dataset tomando las primeras 590 instancias como train y las últimas 100 como test.
+Seleccionamos mediante AIC el mejor modelo de regresión logística
+```{r}
+fit1 <- glm(V16~., data=train, family=binomial)
+fit0 <- glm(V16~1, data=train, family=binomial)
+library(MASS)
+step <-stepAIC(fit0,direction="forward",scope=list(upper=fit1,lower=fit0))
+
+AIC(step)
+step$anova
+step$call
+```
+El AIC del modelo seleccionado es:
+```{r}
+extractAIC(glm(formula = V16 ~ V9 + V11 + V15 + V5 + V7 + V13 + V14 + V10 + V8, family = binomial, data = train),scale=0)
+```
+Dividimos el Dataset con las variables más influyentes.
+```{r}
+train<-mdf[1:590,]
+test<-mdf[591:690,]
+# Dividimos en los conjuntos de train y test
+
+X_train <- model.matrix( V16 ~ V9 + V11 + V15 + V5 + V7 + V13 + V14 + V10 + V8 ,train)
+y_train <- train$V16
+X_test <- model.matrix( V16 ~ V9 + V11 + V15 + V5 + V7 + V13 + V14 + V10 + V8 ,test)
+y_test <- test$V16
+```
+
+4. Entrena un modelo de regresión logística con regularización Ridge y Lasso en train seleccionando el que mejor **AUC** tenga. Da las métricas en test.
+
+**MODELO DE REGULARIZACIÓN RIDGE**
+```{r}
+#install.packages("glmnet")
+library(glmnet)
+#install.packages(c("e1071", "caret", "e1071"))
+library(caret)
+library(ggplot2)
+library(lattice)
+library(e1071)
+
+set.seed(999)
+
+cv.ridge <- cv.glmnet(X_train, y_train, family='binomial', alpha=0, parallel=TRUE, standardize=TRUE, type.measure='auc')
+
+
+plot(cv.ridge)
+
+#Valor mínimo de landa 
+
+cv.ridge$lambda.min
+
+#Valor del error para el valor mínimo de landa
+
+max(cv.ridge$cvm)
+
+#Coeficientes para el mínimo lanmbda
+
+coef_ridge = coef(cv.ridge, cv.ridge$lambda.min)
+
+# Métricas en Test
+
+y_predridge <- as.numeric(predict.glmnet(cv.ridge$glmnet.fit, newx=X_test, s=cv.ridge$lambda.min)>.5)
+
+confusionMatrix(data = as.factor(y_test), reference = as.factor(y_predridge), mode="everything", positive="1") 
+```
+**MODELO DE REGULARIZACIÓN LASSO**
+```{r}
+set.seed(999)
+
+cv.lasso <- cv.glmnet(X_train, y_train, family='binomial', alpha=1, parallel=TRUE, standardize=TRUE, type.measure='auc')
+
+
+print(cv.lasso)
+
+#Obtenemos el gráfico. 
+
+plot(cv.lasso)
+
+
+#Valor mínimo de landa 
+
+cv.lasso$lambda.min
+
+#Valor del error para el valor mínimo de landa
+max(cv.lasso$cvm)
+
+
+#Coeficientes para el mínimo landa
+
+coef_lasso = coef(cv.lasso, cv.lasso$lambda.min)
+
+# Métricas en test
+
+y_predlasso <- as.numeric(predict.glmnet(cv.lasso$glmnet.fit, newx=X_test, s=cv.lasso$lambda.min)>.5)
+
+confusionMatrix(data = as.factor(y_predlasso), reference = as.factor(y_test), mode="everything", positive = "1") 
+```
+Para seleccionar el mejor modelo, utilizaremos el que mejor AUC tenga.
+```{r}
+library(pROC)
+
+#ROC RIDGE
+roc_ridge <-roc(y_test, y_predridge, plot = TRUE, legacy.axes = TRUE,
+     percent = TRUE, xlab = "1-Especificidad",
+     ylab = "Sensibilidad", col= "indianred3",lwd = 2,
+     print.auc = TRUE)
+```
+```{r}
+#ROC LASSO
+roc_lasso <- roc(y_test, y_predlasso, plot = TRUE, legacy.axes = TRUE,
+     percent = TRUE, xlab = "1-Especificidad",
+     ylab = "Sensibilidad", col= "plum4",lwd = 2,
+     print.auc = TRUE)
+```
+**Elegiremos el modelo logística de regularización Ridge ya que tiene mayor AUC (70,8%)**
+
+5. Aporta los *log odds* de las variables predictoras sobre la variable objetivo.
+
+Con Log odds ratio conseguimos interpretar los coeficientes de la regresión logística.
+```{r}
+exp(coef_ridge)
+```
+Como se puede comprobar, cabe destacar que la variable V5gg tiene mayor probabilidad que las demás variables de que el credito sea aceptado.
+
+6. Si por cada verdadero positivo ganamos 100e y por cada falso positivo perdemos 20e. ¿Qué valor monetario generará el modelo teniendo en cuénta la matriz de confusión del modelo con mayor AUC (con las métricas en test)?
+
+```{r}
+confusionMatrix(data = as.factor(y_predridge), reference = as.factor(y_test), mode="everything", positive = "1")
+```
+Verdadero positivo= 6
+Falso Positivo= 1
+
+```{r}
+value<-6*100-20*1
+value
+```
+El valor monetario que generaría el Modelo sería de 580eur.
+
